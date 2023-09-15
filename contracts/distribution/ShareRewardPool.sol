@@ -297,6 +297,7 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
             pool.token.safeTransferFrom(_sender, address(this), _amount);
             user.amount = user.amount.add(_amount);
         }
+        updatePoolWithGaugeDeposit(_pid);
         user.rewardDebt = user.amount.mul(pool.accSharePerShare).div(1e18);
         emit Deposit(_onBehalf, _pid, _amount);
     }
