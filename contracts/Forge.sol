@@ -9,11 +9,11 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 
-import "./utils/ContractGuard.sol";
-import "./utils/ShareWrapper.sol";
+import "./utils/ContractGuardUpgradeable.sol";
+import "./utils/ShareWrapperUpgradeable.sol";
 import "./interfaces/ITreasury.sol";
 
-contract Forge is ShareWrapper, ContractGuard, Initializable, AccessControlUpgradeable, UUPSUpgradeable {
+contract Forge is Initializable, ShareWrapperUpgradeable, ContractGuardUpgradeable, AccessControlUpgradeable, UUPSUpgradeable {
     using SafeERC20 for IERC20;
     using Address for address;
     using SafeMath for uint256;
