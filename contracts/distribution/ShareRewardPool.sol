@@ -13,6 +13,9 @@ import "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "../aerodrome/interfaces/IGauge.sol";
 import "../aerodrome/interfaces/IVoter.sol";
 
+import {IGauge as IEqualGauge} as "../equalizer/interfaces/IGauge.sol";
+import {IVoter as IEqualVoter} "../equalizer/interfaces/IVoter.sol";
+
 // Note that this pool has no minter key of bSHARE (rewards).
 // Instead, the governance will call bSHARE distributeReward method and send reward to this pool at the beginning.
 contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgradeable {
@@ -46,11 +49,13 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
 
     IERC20 public share;
     address public aero;
+    address public scale;
     IVoter public voter;
+    IEqualVoter public equalVoter
     address public bribesSafe;
 
     // Info of each pool.
-    PoolInfo[] public poolInfo;
+    PoolInfo[] public poolInfo; 
 
     // Info of each user that stakes LP tokens.
     mapping(uint256 => mapping(address => UserInfo)) public userInfo;
@@ -77,7 +82,7 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
         _disableInitializers();
     }
     
-    function initialize(address _share, uint256 _poolStartTime, address _aero, address _voter, address _bribesSafe) initializer public {
+    function initialize(address _share, uint256 _poolStartTime, address _aero, address _scale, address _voter, address _equalVoter, address _bribesSafe) initializer public {
         __AccessControl_init();
         __UUPSUpgradeable_init();
 
@@ -95,7 +100,9 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
         poolEndTime = poolStartTime + runningTime;
 
         aero = _aero;
+        scale = _scale;
         voter = IVoter(_voter);
+        equalVoter = IEqualVoter(_equalVoter);
         bribesSafe = _bribesSafe;
     }
 
@@ -108,6 +115,13 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
         for (uint256 pid = 0; pid < length; ++pid) {
             require(poolInfo[pid].token != _token, "ShareRewardPool: Pool already exists");
         }
+    }
+
+    function isEqualizerGauge(address gauge) internal view returns (bool success) {
+        (bool success, bytes memory _data) = gauge.staticcall(
+            // Aerodrome gauges don't have a paused() function, so we use the selector of the paused() function of the Equalizer gauge interface
+            abi.encodeWithSelector(IEqualGauge.paused.selector)
+        );
     }
 
     // Add a new lp to the pool. Can only be called by the owner.
@@ -226,10 +240,14 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
             pool.accSharePerShare = pool.accSharePerShare.add(_shareReward.mul(1e18).div(tokenSupply));
         }
         pool.lastRewardTime = block.timestamp;
-        claimAeroRewards(_pid);
+        if (isEqualizerGauge(pool.gaugeInfo.gauge)) {
+            claimScaleRewards(_pid);
+        } else {
+            claimAeroRewards(_pid);
+        }
     }
 
-    // Deposit LP tokens to earn AERO
+    // Deposit LP tokens to earn AERO/SCALE
     function updatePoolWithGaugeDeposit(uint256 _pid) public {
         PoolInfo storage pool = poolInfo[_pid];
         address gauge = address(pool.gaugeInfo.gauge);
@@ -258,11 +276,25 @@ contract ShareRewardPool is Initializable, AccessControlUpgradeable, UUPSUpgrade
         }
     }
 
+    // Claim SCALE rewards to treasury
+    function claimScaleRewards(uint256 _pic) public {
+        PoolInfo storage pool = poolInfo[_pid];
+        if (pool.gaugeInfo.isGauge) {
+            // claim the scale
+            pool.gaugeInfo.gauge.getReward(address(this));
+            IERC20(scale).safeTransfer(bribesSafe, IERC20(scale).balanceOf(address(this)));   
+        }
+    }
+
     // Add a gauge to a pool
     function enableGauge(uint256 _pid) public onlyRole(OPERATOR_ROLE) {
-        address gauge = voter.gauges(address(poolInfo[_pid].token));
-        if (gauge != address(0)) {
-            poolInfo[_pid].gaugeInfo = GaugeInfo(true, IGauge(gauge));
+        address aeroGauge = voter.gauges(address(poolInfo[_pid].token));
+        address equalGauge = equalVoter.gauges(address(poolInfo[_pid].token));
+        if (aeroGauge != address(0)) {
+            poolInfo[_pid].gaugeInfo = GaugeInfo(true, IGauge(aeroGauge));
+        }
+        if (equalGauge != address(0)) {
+            poolInfo[_pid].gaugeInfo = GaugeInfo(true, IGauge(equalGauge));
         }
     }
 
